@@ -3,15 +3,22 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  let latestActivitiesRequest = 0;
 
   // Function to fetch activities from API
   async function fetchActivities() {
+    const requestId = ++latestActivitiesRequest;
+
     try {
       const response = await fetch("/activities");
       const activities = await response.json();
+      if (requestId !== latestActivitiesRequest) {
+        return;
+      }
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      activitySelect.replaceChildren(new Option("-- Select an activity --", ""));
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -27,6 +34,59 @@ document.addEventListener("DOMContentLoaded", () => {
           <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
         `;
 
+        const participantsHeading = document.createElement("h5");
+        participantsHeading.className = "participants-heading";
+        participantsHeading.textContent = `Participants (${details.participants.length})`;
+        activityCard.appendChild(participantsHeading);
+
+        const participantList = document.createElement("ul");
+        participantList.className = "participant-list";
+        if (details.participants.length) {
+          details.participants.forEach((email) => {
+            const participant = document.createElement("li");
+
+            const participantEmail = document.createElement("span");
+            participantEmail.textContent = email;
+            participant.appendChild(participantEmail);
+
+            const removeButton = document.createElement("button");
+            removeButton.type = "button";
+            removeButton.className = "participant-remove";
+            removeButton.textContent = "×";
+            removeButton.title = `Remove ${email} from ${name}`;
+            removeButton.setAttribute("aria-label", `Remove ${email} from ${name}`);
+            removeButton.addEventListener("click", async () => {
+              removeButton.disabled = true;
+              try {
+                const response = await fetch(
+                  `/activities/${encodeURIComponent(name)}/signup?email=${encodeURIComponent(email)}`,
+                  { method: "DELETE" }
+                );
+                const result = await response.json();
+
+                if (!response.ok) {
+                  throw new Error(result.detail || "Unable to remove participant");
+                }
+
+                await fetchActivities();
+              } catch (error) {
+                removeButton.disabled = false;
+                messageDiv.textContent = error.message || "Unable to remove participant";
+                messageDiv.className = "error";
+                messageDiv.classList.remove("hidden");
+              }
+            });
+            participant.appendChild(removeButton);
+            participantList.appendChild(participant);
+          });
+        } else {
+          const emptyState = document.createElement("li");
+          emptyState.className = "participant-empty";
+          emptyState.textContent = "No participants yet";
+          participantList.appendChild(emptyState);
+        }
+        activityCard.appendChild(participantList);
+
         activitiesList.appendChild(activityCard);
 
         // Add option to select dropdown
@@ -36,6 +96,10 @@ document.addEventListener("DOMContentLoaded", () => {
         activitySelect.appendChild(option);
       });
     } catch (error) {
+      if (requestId !== latestActivitiesRequest) {
+        return;
+      }
+
       activitiesList.innerHTML = "<p>Failed to load activities. Please try again later.</p>";
       console.error("Error fetching activities:", error);
     }
@@ -62,6 +126,7 @@ document.addEventListener("DOMContentLoaded", () => {
         messageDiv.textContent = result.message;
         messageDiv.className = "success";
         signupForm.reset();
+        await fetchActivities();
       } else {
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
